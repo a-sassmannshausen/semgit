@@ -5,26 +5,25 @@
   #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
+  #:use-module (srfi srfi-9 gnu)
   #:export ())
 
-(define-record-type <commit-message>
-  (commit-message subject body)
-  commit-message?
-  (subject commit-message-subject)
-  (body commit-message-body))
+;; semcommit := subject body [<semtag> ...]
+(define-immutable-record-type <semcommit>
+  (semcommit subject body)
+  semcommit?
+  (subject semcommit-subject)
+  (body semcommit-body)
+  (semtags semcommit-semtags set-semcommit-semtags))
 
+;; semtag := 'name value
 (define-record-type <semtag>
   (semtag name value)
   semtag?
   (name semtag-name)
   (value semtag-value))
 
-;; semgit := <commit-message> [<semtag> ...]
-(define-record-type <semgit>
-  (semgit message tags)
-  semgit?
-  (message semgit-message)
-  (tags semgit-tags))
+;;;; Poor man's git commit message importer
 
 (define %file ".tmp-commit-msg")
 
@@ -36,14 +35,30 @@
 (define* (fetch-commit-message #:optional (file %file))
   (with-input-from-file file
     (lambda ()
-      (commit-message (read-line) (read-delimited ";")))))
+      (semcommit (read-line) (read-delimited ";")))))
 
-(define (enhance-commit-message commitmsg . semtags)
-  (semgit commitmsg semtags))
+;;;; Git tools
 
-(define (semgit->string semgit)
-  (match semgit
-    (($ <semgit> ($ <commit-message> subject body) (semtags ...))
+(define* (git-amend-commit semgit #:optional (hash ""))
+  (system* "git" "commit" "--amend" "-m" (semcommit->string semgit) hash))
+
+(define* (git-augment-commit semtags #:optional (hash "") (file %file))
+  (dump-commit-message hash file)
+  (git-amend-commit 
+   (set-semcommit-semtags (fetch-commit-message file)
+                          (match semtags
+                            ((semtags ...) semtags)
+                            (semtag (list semtag))))
+   hash))
+
+;;;; semcommit tools
+
+(define (enhance-commit-message semcommit semtags)
+  (set-semcommit-semtags semcommit semtags))
+
+(define (semcommit->string semcommit)
+  (match semcommit
+    (($ <semcommit> subject body (semtags ...))
      (string-join `(,subject ,body "---semgit---"
                              ,@(map semtag->string semtags))
                   "\n"))))
@@ -53,14 +68,5 @@
     (($ <semtag> name value)
      (string-append (symbol->string name) ": " value))))
 
-(define* (augment-commit semgit #:optional (hash ""))
-  (system* "git" "commit" "--amend" "-m" (semgit->string semgit)
-           hash))
-
-(define* (git-augment-commit semtags #:optional (hash "") (file %file))
-  (dump-commit-message hash file)
-  (augment-commit (enhance-commit-message (fetch-commit-message file)
-                                          semtags)
-                  hash))
-
 (git-augment-commit (semtag 'feature "semtags"))
+
