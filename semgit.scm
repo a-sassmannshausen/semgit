@@ -53,9 +53,14 @@
     (($ <semtag> name value)
      (string-append (symbol->string name) ": " value))))
 
-(semgit->string (enhance-commit-message (fetch-commit-message)
-                                        (semtag 'feature "semtags")))
-
-(define* (augment-commit semgit #:optional hash)
+(define* (augment-commit semgit #:optional (hash ""))
   (system* "git" "commit" "--amend" "-m" (semgit->string semgit)
-           (or hash "")))
+           hash))
+
+(define* (git-augment-commit semtags #:optional (hash "") (file %file))
+  (dump-commit-message hash file)
+  (augment-commit (enhance-commit-message (fetch-commit-message file)
+                                          semtags)
+                  hash))
+
+(git-augment-commit (semtag 'feature "semtags"))
