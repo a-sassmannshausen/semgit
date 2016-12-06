@@ -55,6 +55,7 @@
             semtag-name semtag-value
 
             current-branch
+            in-git-repo?
 
             semgit-tidy
             branch-add-tags
@@ -216,6 +217,9 @@ project."
                       (lambda (error path stat errno result) result)
                       '()
                       branch-dir)))
+
+(define (in-git-repo?)
+  (file-exists? ".git"))
 
 
 ;;;; Semtag Manipulators

@@ -170,6 +170,10 @@ last command simply removes any semgit backup branches."
 ;;;; Main
 
 (let* ((options (getopt-config-auto (program-arguments) config)))
+  (when (not (in-git-repo?))
+    (format #t "No git repository found in current directory.
+Are you sure you meant to run `git sem' commands here?~%")
+    (exit 1))
   (match (subcommand options)
     ('tidy (run-system (semgit-tidy (option-ref options 'checkout))))
     ('tag
@@ -187,4 +191,5 @@ last command simply removes any semgit backup branches."
                                               (const "bug-number"))
                                        (option-ref options 'tags))))))
     (e (emit-help options)
-       (format #t "~a: unknown subcommand.~%" e))))
+       (format #t "~a: unknown subcommand.~%" e)
+       (exit 1))))
