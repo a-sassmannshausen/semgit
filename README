@@ -1,0 +1,36 @@
+-*- mode: org -*-
+
+* Overview
+
+  Semgit is an experiment in augmenting git commit messages with
+  temporary keywords.
+
+  This might primarily be useful in the context of needing to keep
+  track of customizations of production code, to relatively easily
+  prepare that code base for future upgrades.
+
+* Installation
+
+  To install semgit you will need Guile 2.0 or later.  At present all
+  other dependencies come bundled.
+
+  After cloning this repository you will need to update your
+  GUILE_LOAD_PATH environment variable:
+  $ export GUILE_LOAD_PATH=${path/to/semgit/repository}:${GUILE_LOAD_PATH}
+  
+  You can then add the git-sem script to your PATH, e.g. by symlinking
+  it into one of your bin directories.
+
+* Usage
+
+  Documentation is still relatively sparse, but running
+  $ git sem --help
+  Should get you started.
+
+  The basic workflow is as follows:
+
+  $ git checkout -b $topic-branch   # Create a new topic branch
+  # Carry out work...
+  $ git sem tag -t                  # Tag all commits in topic branch
+                                    # with "topic: $topic-branch" branchname
+  $ git sem tidy                    # Remove all temporary gitsem branches.
