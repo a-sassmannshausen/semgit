@@ -1,0 +1,186 @@
+#!/usr/bin/env guile
+-s
+coding:utf-8
+-*- scheme -*-
+!#
+;;; Semgit --- Semantic git commit messages
+;;; Copyright © 2016 Alex Sassmannshausen <alex.sassmannshausen@ptfs-europe.com>
+;;;
+;;; This file is part of Semgit.
+;;;
+;;; Semgit is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3 of the License, or
+;;; (at your option) any later version.
+;;;
+;;; Semgit is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+;;;
+;;; You should have received a copy of the GNU General Public License
+;;; along with Semgit.  If not, see <http://www.gnu.org/licenses/>.
+
+(use-modules (semgit)
+             (ice-9 match)
+             (semgit conf))
+
+(define config
+  (configuration
+   'semgit
+   "Annotate Git commits semantically."
+   (list (configuration
+          'tidy
+          "Remove all semgit temporary branches."
+          (list
+           (public-option
+            'checkout
+            "Checkout this branch before tidying."
+            #:single-char #\c
+            #:value #f
+            #:handler identity
+            #:test (match-lambda
+                     (#f #t)
+                     ((? string?) #t))
+            #:example "master"))
+          #:inherit #t
+          #:alias 'td
+          #:long "We create temporary branches aggressively, so that
+we can guarantee that no work is lost when we run into errors.  After
+running semgit operations you can remove those temporary branches by
+running this command.")
+
+         (configuration
+          'tag
+          "Add tags to commits."
+          (list
+           (public-option
+            'topic
+            "Tag commits with a topic."
+            #:value #f
+            #:optional? #t
+            #:handler (match-lambda
+                        (#t (semtag "topic" (current-branch)))
+                        (string (semtag "topic" string))
+                        (_ "TOPIC should not have a value or the name
+of the topic you wish to tag the commits with."))
+            #:test semtag?
+            #:single-char #\t
+            #:example "foo-feature")
+           (public-option
+            'bug-number
+            "Tag commits with a bug-number."
+            #:value #f
+            #:single-char #\b
+            #:optional? #t
+            #:handler (match-lambda
+                        (#t (semtag "bug-number" (current-branch)))
+                        (string (semtag "bug-number" string))
+                        (_ "BUG-NUMBER should not have a value or the
+bug-number you wish to tag the commits with."))
+            #:test semtag?
+            #:single-char #\b
+            #:example "5676")
+           (public-option
+            'tags
+            "Tag commits with key=value tags."
+            #:value '()
+            #:handler (lambda (tags)
+                        (map (lambda (tag)
+                               (apply semtag (string-split tag #\=)))
+                             (string-split tags #\,)))
+            #:test (match-lambda
+                     (((? semtag?) ...) #t)
+                     (_ #f))
+            #:single-char #\T
+            #:example "foo=bar,baz=frob"))
+          #:inherit #t
+          #:alias 'tg
+          #:long "Use this subcommand to tag commits with additional
+keywords.  The current workflow assumes that you want to tag all
+commits present on the current branch and not on master.
+
+To tag these with a 'topic' tag, use the '--topic' argument.  To
+freely tag, use the '--[T]ags' argument.")
+
+         (configuration
+          'remove
+          "Remove tags from commits."
+          (list
+           (public-option
+            'topic
+            "Remove 'topic' tags."
+            #:value #f
+            #:single-char #\t)
+           (public-option
+            'bug-number
+            "Remove 'bug-number' tags."
+            #:value #f
+            #:single-char #\b)
+           (public-option
+            'tags
+            "Remove matching comma-separated tags."
+            #:value '()
+            #:handler (lambda (tags)
+                        (string-split tags #\,))
+            #:test (match-lambda
+                     (((? string?) ...) #t)
+                     (_ #f))
+            #:example "foo,bar,baz"
+            #:single-char #\T))
+          #:inherit #t
+          #:alias 'rm
+          #:long "The 'remove' subcommand allows you to remove tags from
+your branch commits (see the 'add' command for contrast).  specifying
+no arguments will remove all tags on commits in this branch."))
+
+   #:long "Deploying in-house features to production servers running
+upstream code can quickly become a frustrating experience: at the next
+upgrade it becomes very hard to establish exactly what features where
+added in-house.
+
+Semantic tagging of git commits alleviates this problem by providing
+information about commits applied to production code with precise tags
+annotating those commits that are in-house additions.
+
+Semgit is an implementation of this idea written in Guile Scheme.  A
+common workflow would be:
+
+$ git checkout -b $topic-branch
+
+# Carry out work...
+
+$ git sem tag -t
+
+$ git sem tidy
+
+The penultimate command would tag all commits in your $topic-branch
+that are not part of master with the 'feature: $topic-branch tag.  The
+last command simply removes any semgit backup branches."
+   #:inherit #t
+   #:help? #t
+   #:usage? #t
+   #:author "Alex Sassmannshausen"
+   #:copyright '(2016)
+   #:license 'gplv3+
+   #:version? "0.1"))
+
+(let* ((options (getopt-config-auto (program-arguments) config)))
+  (match (subcommand options)
+    ('tidy (run-system (semgit-tidy (option-ref options 'checkout))))
+    ('tag
+     (run-system (apply branch-add-tags
+                        (filter identity
+                                (cons* (option-ref options 'topic)
+                                       (option-ref options 'bug-number)
+                                       (option-ref options 'tags))))))
+    ('remove
+     (run-system (apply branch-rm-tags
+                        (filter identity
+                                (cons* (and=> (option-ref options 'topic)
+                                              (const "topic"))
+                                       (and=> (option-ref options 'bug-number)
+                                              (const "bug-number"))
+                                       (option-ref options 'tags))))))
+    (e (emit-help options)
+       (format #t "~a: unknown subcommand.~%" e))))
