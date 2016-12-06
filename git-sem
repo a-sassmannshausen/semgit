@@ -21,9 +21,11 @@ coding:utf-8
 ;;; You should have received a copy of the GNU General Public License
 ;;; along with Semgit.  If not, see <http://www.gnu.org/licenses/>.
 
-(use-modules (semgit)
-             (ice-9 match)
+(use-modules (ice-9 match)
+             (semgit)
              (semgit conf))
+
+;;;; Application configuration
 
 (define config
   (configuration
@@ -164,6 +166,8 @@ last command simply removes any semgit backup branches."
    #:copyright '(2016)
    #:license 'gplv3+
    #:version? "0.1"))
+
+;;;; Main
 
 (let* ((options (getopt-config-auto (program-arguments) config)))
   (match (subcommand options)

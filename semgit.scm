@@ -101,6 +101,8 @@
 
 ;;; The runner
 (define (run-system mvalue)
+  "Run MVALUE a monadic value in the system monad.  Return 0 if all
+went well; throw an error to semgit-system otherwise."
   (match (force (mvalue))
     (0 0)
     (else (throw 'semgit-system "System call returned with: " else))))
@@ -114,6 +116,7 @@
 (define %semgit-tmpbranch "semgit-tmp")
 
 (define (semgit-bkpbranch branchname)
+  "Return the name of a backup branch for BRANCHNAME."
   (string-append "semgit-" branchname "-bkp"))
 
 ;;;; Types
@@ -137,6 +140,8 @@
 ;;;; Git Readers
 
 (define* (fetch-commit-message #:optional (hash ""))
+  "Return a <semcommit> containing the commit message of the git
+commit identified by HASH or at HEAD."
   (let ((cmd (string-join `("git show --pretty=%B -q" ,hash)
                           " ")))
   (let* ((pipe (open-pipe* OPEN_READ "git" "show" "--pretty=%B" "-q"))
@@ -151,6 +156,10 @@
       (else (throw 'git-import "Unable to fetch commit message."))))))
 
 (define* (find-branch-root #:optional (branchname "master"))
+  "Return the hash of the commit at the base of the divergence
+BRANCHNAME (defaulting to master) and our current branch .  The base
+is the first commit to exist in our current branch and not in
+BRANCHNAME."
   (let* ((pipe (open-pipe* OPEN_READ "git" "log" "--format=%H"
                            (string-append branchname "..")))
          (output (begin
@@ -163,10 +172,12 @@
       ((0) (match (filter (negate string-null?)
                           (string-split output #\newline))
              (() #f)
-             (intersection (last intersection))))
+             (divergence (last divergence))))
       (else (throw 'git-import "Unable to fetch commit message.")))))
 
 (define* (find-branch-differences branchname)
+  "Return a list of hashes of all commits present in our current
+branch and not in BRANCHNAME, ordered oldest to newest."
   (let* ((pipe (open-pipe* OPEN_READ "git" "log" "--format=%H"
                            (string-append ".." branchname)))
          (output (begin
@@ -176,16 +187,19 @@
                          (utf8->string bv)))))
          (ret (close-pipe pipe)))
     (case (status:exit-val ret)
-      ((0) (filter (negate string-null?)
-                   (string-split output #\newline)))
+      ((0) (reverse (filter (negate string-null?)
+                            (string-split output #\newline))))
       (else (throw 'git-import "Unable to fetch commit message.")))))
 
 (define (current-branch)
+  "Return the name of the branch we are currently on."
   (last (string-split (with-input-from-file ".git/HEAD"
                         (lambda () (read-line)))
                       #\/)))
 
 (define* (fetch-semgit-branches)
+  "Return a list of branch names currently in existence for this
+project."
   (let ((branch-dir (string-join '(".git" "logs" "refs" "heads")
                                  file-name-separator-string)))
     (file-system-fold (lambda (name stat result)
@@ -207,6 +221,8 @@
 ;;;; Semtag Manipulators
 
 (define (add-semtags semcommit . semtags)
+  "Add the list of <semtag> records SEMTAGS to the <semcommit>
+SEMCOMMIT.  Duplicate tags can be added."
   (if (null? semtags)
       semcommit
       (set-semcommit-semtags semcommit
@@ -215,6 +231,8 @@
                                ((tags ...) (append tags semtags))))))
 
 (define (rm-semtags semcommit . keys)
+  "Remove the <semtag>s identified by KEYS from the <semcommit>
+SEMCOMMIT.  Keys that match no <semtag> are ignored."
   (let ((semtags (semcommit-semtags semcommit)))
     (set-semcommit-semtags semcommit
                            (if (any null? (list semtags keys))
@@ -235,9 +253,11 @@
 ;;;; Serialization
 
 (define (string->semcommit msg)
+  "Return a <semcommit> represented by the string MSG."
   (semcommit (subject msg) (body msg) (semtags msg)))
 
 (define (semcommit->string semcommit)
+  "Return a string representation of <semcommit> SEMCOMMIT."
   (match semcommit
     (($ <semcommit> subject body semtags)
      (string-join (cons* subject body
@@ -250,14 +270,19 @@
                   "\n\n"))))
 
 (define (semtag->string semtag)
+  "Return a string representation of <semtag> SEMTAG."
   (match semtag
     (($ <semtag> name value)
      (string-append name ": " value))))
 
 (define (subject msg)
+  "Return just the subject part of the string MSG treated as a git
+commit message."
   (match:substring (regexp-exec (make-regexp "^.*$" regexp/newline) msg)))
 
 (define (body msg)
+  "Return just the body part of the string MSG treated as a git commit
+message."
   (let* ((esab (regexp-exec (make-regexp "\n\n.*$") msg))
          (base (regexp-exec (make-regexp (string-append %semgit ".*$"))
                             (match:substring esab))))
@@ -267,8 +292,10 @@
                     (match:start base))
          (match:substring esab)))))
 
-(define (semtags body)
-  (let  ((tag-base (string-match (string-append %semgit "\n(.*)") body)))
+(define (semtags msg)
+  "Return a list of <semtags> represented by the final section of
+string MSG treated as a git commit message."
+  (let  ((tag-base (string-match (string-append %semgit "\n(.*)") msg)))
     (if (and tag-base (> (match:count tag-base) 1))
         (fold (lambda (candidate semtags)
                 (match (string-split candidate #\:)
@@ -334,6 +361,8 @@ If omitted, it will default to HEAD, like on the commandline."
 ;;;;; Commit operations
 
 (define (commit-rm-tags . keys)
+  "Remove all semtags identified by KEYS from the last commit in our
+repository.  If KEYS is null, remove all semtags."
   (mlet* %system-monad
       ((new-msg -> (apply rm-semtags (fetch-commit-message) keys)))
     (mbegin %system-monad
@@ -341,6 +370,8 @@ If omitted, it will default to HEAD, like on the commandline."
       (sgit-commit-amend new-msg))))
 
 (define (commit-add-tags . semtags)
+  "Add SEMTAGS, a list of <semtag> records, to the last commit in our
+repository."
   (mlet* %system-monad
       ((new-msg -> (apply add-semtags (fetch-commit-message) semtags)))
     (mbegin %system-monad
@@ -350,12 +381,19 @@ If omitted, it will default to HEAD, like on the commandline."
 ;;;;; Branch operations
 
 (define (branch-rm-tags . keys)
+  "Remove all semtags identified by KEYS from the all commits in our
+branch, and not in master.  If KEYS is null, remove all semtags."
   (branch-operation rm-semtags keys))
 
 (define (branch-add-tags . semtags)
+  "Add SEMTAGS, a list of <semtag> records, to all commits in our
+branch and not in master."
   (branch-operation add-semtags semtags))
 
 (define (branch-operation operation values)
+  "Higher order helper procedure to perform operations over the
+current branch in the repository.  OPERATION should be a two argument
+procedure taking a semcommit and a list of datums."
   (mlet* %system-monad
       ((branch -> (current-branch)))
     (match (find-branch-root)
@@ -366,7 +404,7 @@ We cannot perform operations in this state.~%" branch)
        (mbegin %system-monad
          (return 0)
          (sgit-checkout-tmp branch-root)
-         (let lp ((commits (reverse (find-branch-differences branch))))
+         (let lp ((commits (find-branch-differences branch)))
            (match commits
              (()
               (mbegin %system-monad
@@ -386,6 +424,8 @@ We cannot perform operations in this state.~%" branch)
 ;;;;; Utilities
 
 (define (semgit-tidy checkout)
+  "Remove all temporary semgit branches from the repository
+(semgit-tmp and any bkp branches found)."
   (mbegin %system-monad
     (return 0)
     (if checkout
